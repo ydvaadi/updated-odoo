@@ -26,7 +26,20 @@ interface AuthProviderProps {
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(() => {
     const savedUser = localStorage.getItem('synergy-user');
-    return savedUser ? JSON.parse(savedUser) : null;
+    if (savedUser) {
+      return JSON.parse(savedUser);
+    }
+    
+    // Auto-login demo user for MVP demonstration
+    const demoUser: User = {
+      id: 'demo-user-1',
+      name: 'Demo User',
+      email: 'demo@synergysphere.com',
+      initials: 'DU',
+    };
+    
+    localStorage.setItem('synergy-user', JSON.stringify(demoUser));
+    return demoUser;
   });
 
   const login = async (email: string, password: string) => {
