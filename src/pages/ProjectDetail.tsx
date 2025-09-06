@@ -213,7 +213,7 @@ export default function ProjectDetail() {
           </div>
 
           <div className="grid gap-4">
-            {projectTasks.map((task) => (
+            {tasks.map((task) => (
               <Card key={task.id} className="card-interactive">
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between">
@@ -263,7 +263,7 @@ export default function ProjectDetail() {
               </Card>
             ))}
 
-            {projectTasks.length === 0 && (
+            {tasks.length === 0 && (
               <Card className="card-elevated">
                 <CardContent className="p-12 text-center">
                   <CheckSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
@@ -287,7 +287,7 @@ export default function ProjectDetail() {
           <Card className="card-elevated">
             <CardContent className="p-6">
               <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
-                {projectMessages.map((message) => (
+                {messages.map((message) => (
                   <div key={message.id} className="flex gap-3">
                     <AvatarInitials initials={message.author.name.slice(0, 2).toUpperCase()} size="sm" />
                     <div className="flex-1">
@@ -302,7 +302,7 @@ export default function ProjectDetail() {
                   </div>
                 ))}
                 
-                {projectMessages.length === 0 && (
+                {messages.length === 0 && (
                   <div className="text-center py-8">
                     <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
                     <p className="text-muted-foreground">No messages yet. Start the conversation!</p>
