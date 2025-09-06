@@ -1,57 +1,102 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useLocalStorage } from "@/hooks/useLocalStorage";
-import { mockNotifications } from "@/data/mockData";
-import { Notification } from "@/types";
+import { apiService, Notification } from "@/services/api";
+import { useToast } from "@/hooks/use-toast";
 import { Bell, CheckCheck, Clock, MessageSquare, FolderKanban, AtSign, Settings, Trash2 } from "lucide-react";
 
 export default function Notifications() {
-  const [notifications, setNotifications] = useLocalStorage<Notification[]>('synergy-notifications', mockNotifications);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const [isLoading, setIsLoading] = useState(true);
+  const { toast } = useToast();
 
-  const getNotificationIcon = (type: Notification['type']) => {
+  // Load notifications on mount
+  useEffect(() => {
+    const loadNotifications = async () => {
+      try {
+        setIsLoading(true);
+        const response = await apiService.getNotifications();
+        setNotifications(response.data);
+      } catch (error) {
+        console.error('Failed to load notifications:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load notifications. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadNotifications();
+  }, [toast]);
+
+  const getNotificationIcon = (type: string) => {
     switch (type) {
-      case 'task':
+      case 'TASK_ASSIGNED':
+      case 'TASK_COMPLETED':
+      case 'TASK_OVERDUE':
         return CheckCheck;
-      case 'project':
+      case 'PROJECT_INVITED':
+      case 'PROJECT_MEMBER_ADDED':
+      case 'PROJECT_MEMBER_REMOVED':
         return FolderKanban;
-      case 'mention':
-        return AtSign;
-      case 'system':
-        return Settings;
+      case 'MESSAGE_POSTED':
+        return MessageSquare;
       default:
         return Bell;
     }
   };
 
-  const getNotificationColor = (type: Notification['type']) => {
+  const getNotificationColor = (type: string) => {
     switch (type) {
-      case 'task':
+      case 'TASK_ASSIGNED':
+      case 'TASK_COMPLETED':
+      case 'TASK_OVERDUE':
         return 'bg-success/10 text-success border-success/20';
-      case 'project':
+      case 'PROJECT_INVITED':
+      case 'PROJECT_MEMBER_ADDED':
+      case 'PROJECT_MEMBER_REMOVED':
         return 'bg-primary/10 text-primary border-primary/20';
-      case 'mention':
+      case 'MESSAGE_POSTED':
         return 'bg-accent/10 text-accent border-accent/20';
-      case 'system':
-        return 'bg-warning/10 text-warning border-warning/20';
       default:
         return 'bg-muted text-muted-foreground';
     }
   };
 
-  const markAsRead = (notificationId: string) => {
-    setNotifications(notifications.map(notification =>
-      notification.id === notificationId
-        ? { ...notification, read: true }
-        : notification
-    ));
+  const markAsRead = async (notificationId: string) => {
+    try {
+      await apiService.markNotificationAsRead(notificationId);
+      setNotifications(notifications.map(notification =>
+        notification.id === notificationId
+          ? { ...notification, isRead: true }
+          : notification
+      ));
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to mark notification as read.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(notifications.map(notification => ({ ...notification, read: true })));
+  const markAllAsRead = async () => {
+    try {
+      await apiService.markAllNotificationsAsRead();
+      setNotifications(notifications.map(notification => ({ ...notification, isRead: true })));
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to mark all notifications as read.",
+        variant: "destructive",
+      });
+    }
   };
 
   const deleteNotification = (notificationId: string) => {
@@ -63,11 +108,11 @@ export default function Notifications() {
   };
 
   const filteredNotifications = notifications.filter(notification => {
-    if (filter === 'unread') return !notification.read;
+    if (filter === 'unread') return !notification.isRead;
     return true;
   });
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = notifications.filter(n => !n.isRead).length;
 
   return (
     <div className="space-y-6">
@@ -115,7 +160,14 @@ export default function Notifications() {
         </TabsList>
 
         <TabsContent value={filter} className="mt-6">
-          {filteredNotifications.length === 0 ? (
+          {isLoading ? (
+            <Card className="card-elevated">
+              <CardContent className="p-12 text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                <p className="text-muted-foreground">Loading notifications...</p>
+              </CardContent>
+            </Card>
+          ) : filteredNotifications.length === 0 ? (
             <Card className="card-elevated">
               <CardContent className="p-12 text-center">
                 <Bell className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
@@ -134,7 +186,7 @@ export default function Notifications() {
             <div className="space-y-3">
               {filteredNotifications.map((notification) => {
                 const IconComponent = getNotificationIcon(notification.type);
-                const isUnread = !notification.read;
+                const isUnread = !notification.isRead;
                 
                 return (
                   <Card 
@@ -151,7 +203,7 @@ export default function Notifications() {
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex-1">
                               <h4 className={`font-semibold ${isUnread ? 'text-foreground' : 'text-muted-foreground'}`}>
-                                {notification.title}
+                                {notification.type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())}
                               </h4>
                               <p className={`text-sm ${isUnread ? 'text-foreground' : 'text-muted-foreground'}`}>
                                 {notification.message}
@@ -166,7 +218,7 @@ export default function Notifications() {
                           <div className="flex items-center justify-between mt-3">
                             <div className="flex items-center gap-1 text-xs text-muted-foreground">
                               <Clock className="h-3 w-3" />
-                              {new Date(notification.timestamp).toLocaleString()}
+                              {new Date(notification.createdAt).toLocaleString()}
                             </div>
                             
                             <div className="flex gap-1">

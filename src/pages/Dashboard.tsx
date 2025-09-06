@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Calendar, Users, CheckSquare, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,39 +8,65 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLocalStorage } from "@/hooks/useLocalStorage";
-import { mockProjects, mockTasks } from "@/data/mockData";
-import { Project } from "@/types";
+import { apiService, Project } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [projects, setProjects] = useLocalStorage<Project[]>('synergy-projects', mockProjects);
-  const [tasks] = useLocalStorage('synergy-tasks', mockTasks);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [tasks, setTasks] = useState<any[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', description: '' });
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
-  const handleCreateProject = () => {
-    if (!newProject.name.trim()) return;
-
-    const project: Project = {
-      id: Date.now().toString(),
-      name: newProject.name,
-      description: newProject.description,
-      taskCount: 0,
-      memberCount: 1,
-      createdAt: new Date().toISOString(),
+  // Load projects and tasks on mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const [projectsData, tasksData] = await Promise.all([
+          apiService.getProjects(),
+          // For now, we'll get tasks from the first project or show empty
+          Promise.resolve([])
+        ]);
+        setProjects(projectsData);
+        setTasks(tasksData);
+      } catch (error) {
+        console.error('Failed to load data:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load projects. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
     };
 
-    setProjects([...projects, project]);
-    setNewProject({ name: '', description: '' });
-    setIsDialogOpen(false);
-    
-    toast({
-      title: "Project created!",
-      description: `${newProject.name} has been created successfully.`,
-    });
+    loadData();
+  }, [toast]);
+
+  const handleCreateProject = async () => {
+    if (!newProject.name.trim()) return;
+
+    try {
+      const project = await apiService.createProject(newProject.name, newProject.description);
+      setProjects([...projects, project]);
+      setNewProject({ name: '', description: '' });
+      setIsDialogOpen(false);
+      
+      toast({
+        title: "Project created!",
+        description: `${newProject.name} has been created successfully.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to create project. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const getGreeting = () => {
@@ -65,13 +91,13 @@ export default function Dashboard() {
     },
     {
       title: "Team Members",
-      value: "12",
+      value: projects.reduce((total, project) => total + (project.memberships?.length || 0), 0),
       icon: Users,
       color: "text-accent",
     },
     {
       title: "Completion Rate",
-      value: "87%",
+      value: tasks.length > 0 ? `${Math.round((tasks.filter(task => task.status === 'DONE').length / tasks.length) * 100)}%` : "0%",
       icon: TrendingUp,
       color: "text-warning",
     },
@@ -165,7 +191,14 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {projects.length === 0 ? (
+        {isLoading ? (
+          <Card className="card-elevated">
+            <CardContent className="p-12 text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-muted-foreground">Loading projects...</p>
+            </CardContent>
+          </Card>
+        ) : projects.length === 0 ? (
           <Card className="card-elevated">
             <CardContent className="p-12 text-center">
               <CheckSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
@@ -199,11 +232,11 @@ export default function Dashboard() {
                       <div className="flex items-center gap-4">
                         <span className="flex items-center gap-1">
                           <CheckSquare className="h-4 w-4" />
-                          {project.taskCount} tasks
+                          {project._count?.tasks || 0} tasks
                         </span>
                         <span className="flex items-center gap-1">
                           <Users className="h-4 w-4" />
-                          {project.memberCount} members
+                          {project.memberships?.length || 0} members
                         </span>
                       </div>
                       <span>

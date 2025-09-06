@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User } from '../types';
+import { apiService } from '../services/api';
 
 interface AuthContextType {
   user: User | null;
@@ -7,6 +8,7 @@ interface AuthContextType {
   signup: (email: string, password: string, name: string) => Promise<void>;
   logout: () => void;
   isAuthenticated: boolean;
+  isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -24,53 +26,69 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
-  const [user, setUser] = useState<User | null>(() => {
-    const savedUser = localStorage.getItem('synergy-user');
-    if (savedUser) {
-      return JSON.parse(savedUser);
-    }
-    
-    // Auto-login demo user for MVP demonstration
-    const demoUser: User = {
-      id: 'demo-user-1',
-      name: 'Demo User',
-      email: 'demo@synergysphere.com',
-      initials: 'DU',
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const userData = await apiService.getCurrentUser();
+        setUser({
+          id: userData.id,
+          name: userData.name,
+          email: userData.email,
+          initials: userData.name.slice(0, 2).toUpperCase(),
+        });
+      } catch (error) {
+        // No valid session, user will need to login
+        console.log('No valid session found');
+      } finally {
+        setIsLoading(false);
+      }
     };
-    
-    localStorage.setItem('synergy-user', JSON.stringify(demoUser));
-    return demoUser;
-  });
+
+    checkAuth();
+  }, []);
 
   const login = async (email: string, password: string) => {
-    // Mock login - in real app, this would call an API
-    const mockUser: User = {
-      id: '1',
-      name: email.split('@')[0],
-      email,
-      initials: email.slice(0, 2).toUpperCase(),
-    };
-    
-    setUser(mockUser);
-    localStorage.setItem('synergy-user', JSON.stringify(mockUser));
+    try {
+      const response = await apiService.login(email, password);
+      setUser({
+        id: response.user.id,
+        name: response.user.name,
+        email: response.user.email,
+        initials: response.user.name.slice(0, 2).toUpperCase(),
+      });
+    } catch (error) {
+      throw new Error('Login failed. Please check your credentials.');
+    }
   };
 
   const signup = async (email: string, password: string, name: string) => {
-    // Mock signup - in real app, this would call an API
-    const mockUser: User = {
-      id: '1',
-      name,
-      email,
-      initials: name.slice(0, 2).toUpperCase(),
-    };
-    
-    setUser(mockUser);
-    localStorage.setItem('synergy-user', JSON.stringify(mockUser));
+    try {
+      const response = await apiService.register(name, email, password);
+      setUser({
+        id: response.user.id,
+        name: response.user.name,
+        email: response.user.email,
+        initials: response.user.name.slice(0, 2).toUpperCase(),
+      });
+    } catch (error) {
+      console.error('Signup error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Registration failed. Please try again.';
+      throw new Error(errorMessage);
+    }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('synergy-user');
+  const logout = async () => {
+    try {
+      await apiService.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setUser(null);
+    }
   };
 
   return (
@@ -81,6 +99,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         signup,
         logout,
         isAuthenticated: !!user,
+        isLoading,
       }}
     >
       {children}

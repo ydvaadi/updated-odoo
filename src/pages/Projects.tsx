@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Search, Calendar, Users, CheckSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,43 +7,64 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useLocalStorage } from "@/hooks/useLocalStorage";
-import { mockProjects } from "@/data/mockData";
-import { Project } from "@/types";
+import { apiService, Project } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Projects() {
-  const [projects, setProjects] = useLocalStorage<Project[]>('synergy-projects', mockProjects);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', description: '' });
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
+
+  // Load projects on mount
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        setIsLoading(true);
+        const projectsData = await apiService.getProjects();
+        setProjects(projectsData);
+      } catch (error) {
+        console.error('Failed to load projects:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load projects. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadProjects();
+  }, [toast]);
 
   const filteredProjects = projects.filter(project =>
     project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     project.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleCreateProject = () => {
+  const handleCreateProject = async () => {
     if (!newProject.name.trim()) return;
 
-    const project: Project = {
-      id: Date.now().toString(),
-      name: newProject.name,
-      description: newProject.description,
-      taskCount: 0,
-      memberCount: 1,
-      createdAt: new Date().toISOString(),
-    };
-
-    setProjects([...projects, project]);
-    setNewProject({ name: '', description: '' });
-    setIsDialogOpen(false);
-    
-    toast({
-      title: "Project created!",
-      description: `${newProject.name} has been created successfully.`,
-    });
+    try {
+      const project = await apiService.createProject(newProject.name, newProject.description);
+      setProjects([...projects, project]);
+      setNewProject({ name: '', description: '' });
+      setIsDialogOpen(false);
+      
+      toast({
+        title: "Project created!",
+        description: `${newProject.name} has been created successfully.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to create project. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -115,7 +136,14 @@ export default function Projects() {
       </div>
 
       {/* Projects Grid */}
-      {filteredProjects.length === 0 ? (
+      {isLoading ? (
+        <Card className="card-elevated">
+          <CardContent className="p-12 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading projects...</p>
+          </CardContent>
+        </Card>
+      ) : filteredProjects.length === 0 ? (
         <Card className="card-elevated">
           <CardContent className="p-12 text-center">
             <CheckSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
@@ -157,11 +185,11 @@ export default function Projects() {
                       <div className="flex items-center gap-4">
                         <span className="flex items-center gap-1">
                           <CheckSquare className="h-4 w-4" />
-                          {project.taskCount} tasks
+                          {project._count?.tasks || 0} tasks
                         </span>
                         <span className="flex items-center gap-1">
                           <Users className="h-4 w-4" />
-                          {project.memberCount} members
+                          {project.memberships?.length || 0} members
                         </span>
                       </div>
                     </div>

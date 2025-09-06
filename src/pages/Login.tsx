@@ -55,9 +55,11 @@ export default function Login() {
         description: "Welcome to SynergySphere!",
       });
     } catch (error) {
+      console.error('Signup error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Please try again.';
       toast({
         title: "Signup failed",
-        description: "Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {

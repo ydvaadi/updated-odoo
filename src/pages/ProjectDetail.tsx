@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Plus, MessageSquare, Users, Calendar, CheckSquare, MoreHorizontal, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,17 +12,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AvatarInitials } from "@/components/ui/avatar-initials";
-import { useLocalStorage } from "@/hooks/useLocalStorage";
-import { mockProjects, mockTasks, mockUsers, mockMessages } from "@/data/mockData";
-import { Project, Task, Message, User } from "@/types";
+import { apiService, Project, Task, Message } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
-  const [projects] = useLocalStorage<Project[]>('synergy-projects', mockProjects);
-  const [tasks, setTasks] = useLocalStorage<Task[]>('synergy-tasks', mockTasks);
-  const [messages, setMessages] = useLocalStorage<Message[]>('synergy-messages', mockMessages);
-  const [members] = useLocalStorage<User[]>('synergy-members', mockUsers);
+  const [project, setProject] = useState<Project | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
   const [isMemberDialogOpen, setIsMemberDialogOpen] = useState(false);
@@ -33,16 +32,53 @@ export default function ProjectDetail() {
     description: '',
     assigneeId: '',
     dueDate: '',
-    status: 'todo' as const,
+    priority: 'MEDIUM' as const,
   });
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [newMessage, setNewMessage] = useState('');
   
   const { toast } = useToast();
 
-  const project = projects.find(p => p.id === id);
-  const projectTasks = tasks.filter(task => task.projectId === id);
-  const projectMessages = messages.filter(msg => msg.projectId === id);
+  // Load project data on mount
+  useEffect(() => {
+    const loadProjectData = async () => {
+      if (!id) return;
+      
+      try {
+        setIsLoading(true);
+        const [projectData, tasksData, messagesData] = await Promise.all([
+          apiService.getProject(id),
+          apiService.getTasks(id),
+          apiService.getMessages(id)
+        ]);
+        
+        setProject(projectData);
+        setTasks(tasksData);
+        setMessages(messagesData);
+        setMembers(projectData.memberships?.map(m => m.user) || []);
+      } catch (error) {
+        console.error('Failed to load project data:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load project data. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadProjectData();
+  }, [id, toast]);
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+        <p className="text-muted-foreground">Loading project...</p>
+      </div>
+    );
+  }
 
   if (!project) {
     return (
@@ -55,76 +91,91 @@ export default function ProjectDetail() {
     );
   }
 
-  const handleCreateTask = () => {
-    if (!newTask.title.trim()) return;
+  const handleCreateTask = async () => {
+    if (!newTask.title.trim() || !id) return;
 
-    const assignee = members.find(m => m.id === newTask.assigneeId) || members[0];
-    
-    const task: Task = {
-      id: Date.now().toString(),
-      title: newTask.title,
-      description: newTask.description,
-      status: newTask.status,
-      assignee,
-      dueDate: newTask.dueDate,
-      projectId: id!,
-    };
-
-    setTasks([...tasks, task]);
-    setNewTask({ title: '', description: '', assigneeId: '', dueDate: '', status: 'todo' });
-    setNewTaskDialog(false);
-    
-    toast({
-      title: "Task created!",
-      description: `${newTask.title} has been added to the project.`,
-    });
+    try {
+      const task = await apiService.createTask(
+        id,
+        newTask.title,
+        newTask.description,
+        newTask.assigneeId || undefined,
+        newTask.dueDate || undefined,
+        newTask.priority
+      );
+      
+      setTasks([...tasks, task]);
+      setNewTask({ title: '', description: '', assigneeId: '', dueDate: '', priority: 'MEDIUM' });
+      setNewTaskDialog(false);
+      
+      toast({
+        title: "Task created!",
+        description: `${newTask.title} has been added to the project.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to create task. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleTaskStatusChange = (taskId: string, newStatus: Task['status']) => {
-    setTasks(tasks.map(task => 
-      task.id === taskId ? { ...task, status: newStatus } : task
-    ));
-    
-    toast({
-      title: "Task updated!",
-      description: "Task status has been changed.",
-    });
+  const handleTaskStatusChange = async (taskId: string, newStatus: Task['status']) => {
+    try {
+      const updatedTask = await apiService.updateTask(taskId, undefined, undefined, newStatus);
+      setTasks(tasks.map(task => 
+        task.id === taskId ? updatedTask : task
+      ));
+      
+      toast({
+        title: "Task updated!",
+        description: "Task status has been changed.",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update task. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleSendMessage = () => {
-    if (!newMessage.trim()) return;
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !id) return;
 
-    const message: Message = {
-      id: Date.now().toString(),
-      content: newMessage,
-      sender: members[0], // Current user
-      timestamp: new Date().toISOString(),
-      projectId: id!,
-    };
-
-    setMessages([...messages, message]);
-    setNewMessage('');
-    
-    toast({
-      title: "Message sent!",
-      description: "Your message has been added to the discussion.",
-    });
+    try {
+      const message = await apiService.createMessage(id, newMessage);
+      setMessages([...messages, message]);
+      setNewMessage('');
+      
+      toast({
+        title: "Message sent!",
+        description: "Your message has been added to the discussion.",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to send message. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const getStatusColor = (status: Task['status']) => {
     switch (status) {
-      case 'todo': return 'status-todo';
-      case 'in-progress': return 'status-progress';
-      case 'done': return 'status-done';
+      case 'TODO': return 'status-todo';
+      case 'IN_PROGRESS': return 'status-progress';
+      case 'DONE': return 'status-done';
       default: return 'status-todo';
     }
   };
 
   const getStatusLabel = (status: Task['status']) => {
     switch (status) {
-      case 'todo': return 'To Do';
-      case 'in-progress': return 'In Progress';
-      case 'done': return 'Done';
+      case 'TODO': return 'To Do';
+      case 'IN_PROGRESS': return 'In Progress';
+      case 'DONE': return 'Done';
       default: return 'To Do';
     }
   };
@@ -175,14 +226,18 @@ export default function ProjectDetail() {
                       </div>
                       <p className="text-muted-foreground text-sm mb-3">{task.description}</p>
                       <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                        <div className="flex items-center gap-1">
-                          <AvatarInitials initials={task.assignee.initials} size="sm" />
-                          <span>{task.assignee.name}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Calendar className="h-4 w-4" />
-                          <span>{new Date(task.dueDate).toLocaleDateString()}</span>
-                        </div>
+                        {task.assignee && (
+                          <div className="flex items-center gap-1">
+                            <AvatarInitials initials={task.assignee.name.slice(0, 2).toUpperCase()} size="sm" />
+                            <span>{task.assignee.name}</span>
+                          </div>
+                        )}
+                        {task.dueDate && (
+                          <div className="flex items-center gap-1">
+                            <Calendar className="h-4 w-4" />
+                            <span>{new Date(task.dueDate).toLocaleDateString()}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <DropdownMenu>
@@ -192,13 +247,13 @@ export default function ProjectDetail() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleTaskStatusChange(task.id, 'todo')}>
+                        <DropdownMenuItem onClick={() => handleTaskStatusChange(task.id, 'TODO')}>
                           Mark as To Do
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleTaskStatusChange(task.id, 'in-progress')}>
+                        <DropdownMenuItem onClick={() => handleTaskStatusChange(task.id, 'IN_PROGRESS')}>
                           Mark as In Progress
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleTaskStatusChange(task.id, 'done')}>
+                        <DropdownMenuItem onClick={() => handleTaskStatusChange(task.id, 'DONE')}>
                           Mark as Done
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -234,12 +289,12 @@ export default function ProjectDetail() {
               <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
                 {projectMessages.map((message) => (
                   <div key={message.id} className="flex gap-3">
-                    <AvatarInitials initials={message.sender.initials} size="sm" />
+                    <AvatarInitials initials={message.author.name.slice(0, 2).toUpperCase()} size="sm" />
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-semibold text-sm">{message.sender.name}</span>
+                        <span className="font-semibold text-sm">{message.author.name}</span>
                         <span className="text-xs text-muted-foreground">
-                          {new Date(message.timestamp).toLocaleString()}
+                          {new Date(message.createdAt).toLocaleString()}
                         </span>
                       </div>
                       <p className="text-sm">{message.content}</p>
@@ -284,7 +339,7 @@ export default function ProjectDetail() {
               <Card key={member.id} className="card-elevated">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
-                    <AvatarInitials initials={member.initials} />
+                    <AvatarInitials initials={member.name.slice(0, 2).toUpperCase()} />
                     <div>
                       <h3 className="font-semibold">{member.name}</h3>
                       <p className="text-sm text-muted-foreground">{member.email}</p>
